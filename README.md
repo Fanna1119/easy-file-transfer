@@ -17,6 +17,9 @@ A lightweight desktop app for transferring files over SSH using `rsync`. Built w
 - [Bun](https://bun.sh) (for development)
 - [Rust](https://rustup.rs) toolchain
 
+## Pre built mac binaries
+see [Releases](https://github.com/Fanna1119/easy-file-transfer/releases)
+
 ## Development
 
 ```bash

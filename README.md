@@ -2,6 +2,14 @@
 
 A lightweight desktop app for transferring files over SSH using `rsync`. Built with [Tauri](https://tauri.app) (Rust) and React + TypeScript.
 
+## Screenshots
+
+<img src="public/Screenshot 2026-04-02 at 09.43.02.png" alt="Upload mode with active transfer" width="600">
+
+<img src="public/Screenshot 2026-04-02 at 09.43.53.png" alt="Download mode" width="600">
+
+<img src="public/Screenshot 2026-04-02 at 09.39.50.png" alt="Remote directory browser" width="600">
+
 ## Features
 
 - **File selection** — pick individual files or whole directories from your local machine

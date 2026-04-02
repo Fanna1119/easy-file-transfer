@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Save, List, Trash2 } from "lucide-react";
-import type { Profile } from "../types";
+import type { Profile, TransferDirection } from "../types";
 
 interface ProfileManagerProps {
   profiles: Profile[];
@@ -8,6 +8,8 @@ interface ProfileManagerProps {
   currentSshKey: string | null;
   currentDryRun: boolean;
   currentChecksum: boolean;
+  currentDirection: TransferDirection;
+  currentLocalDestination: string | null;
   onSave: (profile: Profile) => void;
   onDelete: (id: string) => void;
 }
@@ -18,6 +20,8 @@ export function ProfileManager({
   currentSshKey,
   currentDryRun,
   currentChecksum,
+  currentDirection,
+  currentLocalDestination,
   onSave,
   onDelete,
 }: ProfileManagerProps) {
@@ -34,6 +38,8 @@ export function ProfileManager({
       sshKey: currentSshKey,
       dryRun: currentDryRun,
       checksum: currentChecksum,
+      direction: currentDirection,
+      localDestination: currentLocalDestination,
     });
     setProfileName("");
     setShowSave(false);

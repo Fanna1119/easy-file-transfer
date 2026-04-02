@@ -15,6 +15,12 @@ pub struct Profile {
     pub ssh_key: Option<String>,
     pub dry_run: bool,
     pub checksum: bool,
+    /// "upload" or "download"; None means legacy profile (treated as upload).
+    #[serde(default)]
+    pub direction: Option<String>,
+    /// Local destination folder for download-mode profiles.
+    #[serde(default)]
+    pub local_destination: Option<String>,
 }
 
 fn profiles_path(app: &AppHandle) -> Result<PathBuf, String> {

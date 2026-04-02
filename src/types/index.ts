@@ -1,5 +1,7 @@
 // ── Transfer types ────────────────────────────────────────────────────────────
 
+export type TransferDirection = "upload" | "download";
+
 export interface TransferConfig {
   files: string[];
   destination: string;
@@ -8,6 +10,8 @@ export interface TransferConfig {
   dryRun: boolean;
   checksum: boolean;
   basePath: string | null;
+  direction: TransferDirection;
+  localDestination: string | null;
 }
 
 export interface ProgressEvent {
@@ -81,4 +85,6 @@ export interface Profile {
   sshKey: string | null;
   dryRun: boolean;
   checksum: boolean;
+  direction?: TransferDirection;
+  localDestination?: string | null;
 }

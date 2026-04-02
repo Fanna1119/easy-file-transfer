@@ -34,6 +34,15 @@ pub struct TransferConfig {
     pub checksum: bool,
     #[allow(dead_code)]
     pub base_path: Option<String>,
+    /// "upload" (local → remote) or "download" (remote → local)
+    #[serde(default = "default_direction")]
+    pub direction: String,
+    /// Local destination folder used in download mode.
+    pub local_destination: Option<String>,
+}
+
+fn default_direction() -> String {
+    "upload".to_string()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -107,10 +116,23 @@ fn build_rsync_args(cfg: &TransferConfig, gnu_rsync: bool) -> Vec<String> {
         args.push("ssh -o StrictHostKeyChecking=accept-new".into());
     }
 
-    for file in &cfg.files {
-        args.push(file.clone());
+    if cfg.direction == "download" {
+        // Remote source → local destination
+        args.push(cfg.destination.clone());
+        args.push(
+            cfg.local_destination
+                .as_deref()
+                .unwrap_or(".")
+                .to_string(),
+        );
+    } else {
+        // Upload: local files → remote destination
+        for file in &cfg.files {
+            args.push(file.clone());
+        }
+        args.push(cfg.destination.clone());
     }
-    args.push(cfg.destination.clone());
+
     args
 }
 

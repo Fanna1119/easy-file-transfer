@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   ChevronLeft,
@@ -50,6 +50,33 @@ export function RemoteBrowserPane({
   const [dragOver, setDragOver] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const anchorIdxRef = useRef<number | null>(null);
+
+  type SortCol = "name" | "size" | "modified";
+  const [sortCol, setSortCol] = useState<SortCol>("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  const sortedEntries = useMemo(() => {
+    return [...entries].sort((a, b) => {
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+      let cmp = 0;
+      if (sortCol === "name") {
+        cmp = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      } else if (sortCol === "size") {
+        cmp = a.size - b.size;
+      } else {
+        cmp = a.modified.localeCompare(b.modified);
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [entries, sortCol, sortDir]);
+
+  const handleSort = (col: SortCol) => {
+    if (col === sortCol) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortCol(col);
+      setSortDir("asc");
+    }
+  };
   // In-memory cache: connection key → (path → entries)
   const cache = useRef<Map<string, FileEntry[]>>(new Map());
   const connectionKey = `${connection.user}@${connection.host}:${connection.port ?? 22}/${connection.sshKey ?? ""}`;
@@ -236,7 +263,7 @@ export function RemoteBrowserPane({
   // Drag source: remote files being dragged to local pane
   const handleDragStart = (e: React.DragEvent, entry: FileEntry) => {
     const toTransfer = selected.has(entry.path)
-      ? entries
+      ? sortedEntries
           .filter((en) => selected.has(en.path))
           .map((en) => ({ path: en.path, isDir: en.isDir }))
       : [{ path: entry.path, isDir: entry.isDir }];
@@ -365,10 +392,34 @@ export function RemoteBrowserPane({
       </div>
 
       {/* Column headers */}
-      <div className="flex text-xs text-slate-500 font-medium px-2 py-1 bg-slate-800/50 border-b border-slate-700/50 shrink-0">
-        <span className="flex-1 min-w-0">Filename</span>
-        <span className="w-20 text-right shrink-0">Size</span>
-        <span className="w-28 text-right shrink-0 pr-1">Modified</span>
+      <div className="flex text-xs text-slate-500 font-medium px-2 py-1 bg-slate-800/50 border-b border-slate-700/50 shrink-0 select-none">
+        <button
+          onClick={() => handleSort("name")}
+          className="flex-1 min-w-0 text-left flex items-center gap-1 hover:text-slate-300 transition-colors"
+        >
+          Filename{" "}
+          <span className="opacity-60">
+            {sortCol === "name" ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+          </span>
+        </button>
+        <button
+          onClick={() => handleSort("size")}
+          className="w-20 flex items-center justify-end gap-1 shrink-0 hover:text-slate-300 transition-colors"
+        >
+          <span className="opacity-60">
+            {sortCol === "size" ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+          </span>{" "}
+          Size
+        </button>
+        <button
+          onClick={() => handleSort("modified")}
+          className="w-28 flex items-center justify-end gap-1 shrink-0 pr-1 hover:text-slate-300 transition-colors"
+        >
+          <span className="opacity-60">
+            {sortCol === "modified" ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+          </span>{" "}
+          Modified
+        </button>
       </div>
 
       {/* File list */}
@@ -412,7 +463,7 @@ export function RemoteBrowserPane({
               </div>
             )}
 
-            {entries.map((entry, idx) => (
+            {sortedEntries.map((entry, idx) => (
               <div
                 key={entry.path}
                 draggable

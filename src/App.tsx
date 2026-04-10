@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Radio } from "lucide-react";
 import { useTransfer } from "./hooks/useTransfer";
@@ -24,6 +24,29 @@ export default function App() {
   const [connecting, setConnecting] = useState(false);
   const [remotePath, setRemotePath] = useState("~");
   const [localPath, setLocalPath] = useState("~");
+  const [splitPct, setSplitPct] = useState(50);
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+
+  const startResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const container = splitContainerRef.current;
+    if (!container) return;
+    const onMove = (ev: MouseEvent) => {
+      const rect = container.getBoundingClientRect();
+      const pct = Math.min(
+        80,
+        Math.max(20, ((ev.clientX - rect.left) / rect.width) * 100),
+      );
+      setSplitPct(pct);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, []);
+
   const [messages, setMessages] = useState<string[]>([]);
   const [logCollapsed, setLogCollapsed] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -170,14 +193,28 @@ export default function App() {
       />
 
       {/* Dual pane file browser */}
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        <div className="flex-1 min-w-0 overflow-hidden">
+      <div
+        ref={splitContainerRef}
+        className="flex flex-1 min-h-0 overflow-hidden"
+      >
+        <div
+          className="min-w-0 overflow-hidden"
+          style={{ width: `${splitPct}%` }}
+        >
           <LocalBrowser
             onDropRemote={handleDownload}
             onLocalPathChange={setLocalPath}
           />
         </div>
-        <div className="flex-1 min-w-0 overflow-hidden">
+
+        {/* Resize handle */}
+        <div
+          onMouseDown={startResize}
+          className="w-1 shrink-0 bg-slate-700 hover:bg-blue-500 active:bg-blue-400 cursor-col-resize transition-colors"
+          title="Drag to resize"
+        />
+
+        <div className="min-w-0 overflow-hidden flex-1">
           <RemoteBrowserPane
             connected={connected}
             connection={connection}

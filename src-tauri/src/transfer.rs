@@ -10,10 +10,7 @@ use std::{
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::{
-    io::AsyncReadExt,
-    process::Child,
-};
+use tokio::{io::AsyncReadExt, process::Child};
 use uuid::Uuid;
 
 // ── Shared state ──────────────────────────────────────────────────────────────
@@ -30,8 +27,12 @@ pub struct TransferConfig {
     pub destination: String,
     pub ssh_key: Option<String>,
     pub passphrase: Option<String>,
-    pub dry_run: bool,
+    pub resumable: bool,
     pub checksum: bool,
+    /// When true: LAN mode — disables delta algorithm and compression for raw throughput.
+    /// When false (default): WAN mode — enables compression for bandwidth efficiency.
+    #[serde(default)]
+    pub local_network: bool,
     #[allow(dead_code)]
     pub base_path: Option<String>,
     /// "upload" (local → remote) or "download" (remote → local)
@@ -39,6 +40,8 @@ pub struct TransferConfig {
     pub direction: String,
     /// Local destination folder used in download mode.
     pub local_destination: Option<String>,
+    /// Optional SSH port (defaults to 22).
+    pub port: Option<u16>,
 }
 
 fn default_direction() -> String {
@@ -68,13 +71,22 @@ pub struct CompleteEvent {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn create_askpass_script(passphrase: &str) -> std::io::Result<std::path::PathBuf> {
+pub fn create_askpass_script(passphrase: &str) -> std::io::Result<std::path::PathBuf> {
     let escaped = passphrase.replace('\'', "'\\''");
     let content = format!("#!/bin/sh\nprintf '%s' '{}'\n", escaped);
     let path = std::env::temp_dir().join(format!("eft_askpass_{}.sh", Uuid::new_v4()));
     std::fs::write(&path, content)?;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))?;
     Ok(path)
+}
+
+fn expand_tilde(path: &str) -> String {
+    if path == "~" || path.starts_with("~/") {
+        if let Ok(home) = std::env::var("HOME") {
+            return path.replacen('~', &home, 1);
+        }
+    }
+    path.to_string()
 }
 
 fn find_rsync() -> (String, bool) {
@@ -89,7 +101,11 @@ fn find_rsync() -> (String, bool) {
 }
 
 fn build_rsync_args(cfg: &TransferConfig, gnu_rsync: bool) -> Vec<String> {
-    let mut args: Vec<String> = vec!["--archive".into(), "--partial".into(), "--verbose".into()];
+    let mut args: Vec<String> = vec!["--archive".into(), "--verbose".into()];
+
+    if cfg.resumable {
+        args.push("--partial-dir=.rsync-partial".into());
+    }
 
     // --info=progress2 = GNU rsync only; --progress works everywhere
     if gnu_rsync {
@@ -98,33 +114,40 @@ fn build_rsync_args(cfg: &TransferConfig, gnu_rsync: bool) -> Vec<String> {
         args.push("--progress".into());
     }
 
-    if cfg.dry_run {
-        args.push("--dry-run".into());
+    // LAN mode: skip delta algorithm and compression for maximum raw throughput.
+    // WAN mode (default): enable compression to reduce bandwidth usage.
+    if cfg.local_network {
+        args.push("--whole-file".into());
+        args.push("--no-compress".into());
+    } else {
+        args.push("--compress".into());
     }
+
     if cfg.checksum {
         args.push("--checksum".into());
     }
 
+    let port_flag = cfg.port.map(|p| format!("-p {}", p)).unwrap_or_default();
+
     if let Some(ref key) = cfg.ssh_key {
         args.push("-e".into());
         args.push(format!(
-            "ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new",
-            key
+            "ssh {} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new",
+            port_flag, key
         ));
     } else {
         args.push("-e".into());
-        args.push("ssh -o StrictHostKeyChecking=accept-new".into());
+        args.push(format!(
+            "ssh {} -o StrictHostKeyChecking=accept-new",
+            port_flag
+        ));
     }
 
     if cfg.direction == "download" {
         // Remote source → local destination
         args.push(cfg.destination.clone());
-        args.push(
-            cfg.local_destination
-                .as_deref()
-                .unwrap_or(".")
-                .to_string(),
-        );
+        let dest = expand_tilde(cfg.local_destination.as_deref().unwrap_or("."));
+        args.push(dest);
     } else {
         // Upload: local files → remote destination
         for file in &cfg.files {
@@ -175,8 +198,10 @@ pub async fn start_transfer(
 
     // Force C locale so rsync output (numbers, units) is always in a predictable format,
     // regardless of the user's system locale. Also ensure ssh is findable via PATH.
-    cmd.env("LC_ALL", "C")
-        .env("PATH", "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin");
+    cmd.env("LC_ALL", "C").env(
+        "PATH",
+        "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    );
 
     // Passphrase: write a temporary askpass script, set env vars, then remove after spawn.
     let askpass_cleanup = if let Some(ref phrase) = cfg.passphrase {
@@ -193,7 +218,9 @@ pub async fn start_transfer(
         None
     };
 
-    let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn rsync: {}", e))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn rsync: {}", e))?;
 
     if let Some(p) = askpass_cleanup {
         let _ = std::fs::remove_file(p);
@@ -343,14 +370,25 @@ fn emit_line(app: &AppHandle, tid: &str, line: &str, errors: &mut Vec<String>) {
 }
 
 #[tauri::command]
-pub fn cancel_transfer(
-    transfer_id: String,
-    state: State<'_, TransferState>,
-) -> Result<(), String> {
+pub fn cancel_transfer(transfer_id: String, state: State<'_, TransferState>) -> Result<(), String> {
     let mut map = state.0.lock().map_err(|e| e.to_string())?;
-    if let Some((mut child, cancelled)) = map.remove(&transfer_id) {
+    if let Some((child, cancelled)) = map.remove(&transfer_id) {
         cancelled.store(true, Ordering::Relaxed);
-        child.start_kill().map_err(|e| e.to_string())?;
+        if let Some(pid) = child.id() {
+            // Send SIGTERM so rsync can gracefully save the partial file to
+            // --partial-dir before exiting. SIGKILL would leave a random-suffix
+            // temp file behind that rsync can never resume.
+            let _ = std::process::Command::new("kill")
+                .args(["-TERM", &pid.to_string()])
+                .output();
+            // Also SIGTERM any SSH child spawned by rsync (avoids orphan SSH).
+            let _ = std::process::Command::new("pkill")
+                .args(["-TERM", "-P", &pid.to_string()])
+                .output();
+        }
+        // Fall back to SIGKILL if the process doesn't exit on its own.
+        // We drop `child` here; Tokio will reap it when it eventually exits.
+        drop(child);
     }
     Ok(())
 }
@@ -382,4 +420,124 @@ fn dir_size(path: &std::path::Path) -> Result<u64, String> {
         }
     }
     Ok(total)
+}
+
+/// List the entries in a local directory, expanding a leading `~`.
+#[tauri::command]
+pub fn list_local_dir(path: String) -> Result<Vec<crate::FileEntry>, String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Expand ~ to $HOME.
+    let expanded = if path == "~" {
+        std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
+    } else if path.starts_with("~/") {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+        format!("{}{}", home, &path[1..])
+    } else {
+        path
+    };
+
+    let dir_path = std::path::Path::new(&expanded);
+
+    if !dir_path.is_dir() {
+        return Err(format!("Not a directory: {}", expanded));
+    }
+
+    let mut entries: Vec<crate::FileEntry> = Vec::new();
+
+    for entry in std::fs::read_dir(dir_path).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let meta = entry.metadata().map_err(|e| e.to_string())?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        let entry_path = entry.path().to_string_lossy().to_string();
+        let size = if meta.is_dir() { 0 } else { meta.len() };
+
+        let modified = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs().to_string())
+            .unwrap_or_default();
+
+        let mode = meta.permissions().mode();
+        let permissions = format_mode(mode, meta.is_dir());
+
+        entries.push(crate::FileEntry {
+            name,
+            path: entry_path,
+            size,
+            modified,
+            is_dir: meta.is_dir(),
+            permissions,
+        });
+    }
+
+    // Directories first, then alphabetical (case-insensitive).
+    entries.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    Ok(entries)
+}
+
+fn format_mode(mode: u32, is_dir: bool) -> String {
+    let d = if is_dir { 'd' } else { '-' };
+    let bits = [
+        (0o400, 'r'),
+        (0o200, 'w'),
+        (0o100, 'x'),
+        (0o040, 'r'),
+        (0o020, 'w'),
+        (0o010, 'x'),
+        (0o004, 'r'),
+        (0o002, 'w'),
+        (0o001, 'x'),
+    ];
+    let s: String = bits
+        .iter()
+        .map(|&(b, c)| if mode & b != 0 { c } else { '-' })
+        .collect();
+    format!("{}{}", d, s)
+}
+
+/// Rename (or move) a local file or directory.
+#[tauri::command]
+pub fn rename_local(from: String, to: String) -> Result<(), String> {
+    let from_expanded = expand_tilde(&from);
+    // `to` is just a name (no slashes) — build full destination beside the source.
+    let parent = std::path::Path::new(&from_expanded)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| ".".to_string());
+    let dest = format!("{}/{}", parent, to.trim_matches('/'));
+    std::fs::rename(&from_expanded, &dest).map_err(|e| e.to_string())
+}
+
+/// Create a new local directory (including any missing parents).
+#[tauri::command]
+pub fn create_local_dir(path: String, name: String) -> Result<(), String> {
+    let parent = expand_tilde(&path);
+    let target = format!(
+        "{}/{}",
+        parent.trim_end_matches('/'),
+        name.trim_matches('/')
+    );
+    std::fs::create_dir_all(&target).map_err(|e| e.to_string())
+}
+
+/// Delete local files/directories. Each path is removed recursively if it is a directory.
+#[tauri::command]
+pub fn delete_local(paths: Vec<String>) -> Result<(), String> {
+    for raw in &paths {
+        let path = expand_tilde(raw);
+        let p = std::path::Path::new(&path);
+        if p.is_dir() {
+            std::fs::remove_dir_all(&path).map_err(|e| format!("{}: {}", path, e))?;
+        } else {
+            std::fs::remove_file(&path).map_err(|e| format!("{}: {}", path, e))?;
+        }
+    }
+    Ok(())
 }

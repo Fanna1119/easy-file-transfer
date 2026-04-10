@@ -6,8 +6,8 @@ interface ProfileManagerProps {
   profiles: Profile[];
   currentDestination: string;
   currentSshKey: string | null;
-  currentDryRun: boolean;
   currentChecksum: boolean;
+  currentLocalNetwork: boolean;
   currentDirection: TransferDirection;
   currentLocalDestination: string | null;
   onSave: (profile: Profile) => void;
@@ -18,8 +18,8 @@ export function ProfileManager({
   profiles,
   currentDestination,
   currentSshKey,
-  currentDryRun,
   currentChecksum,
+  currentLocalNetwork,
   currentDirection,
   currentLocalDestination,
   onSave,
@@ -36,8 +36,8 @@ export function ProfileManager({
       name: profileName.trim(),
       destination: currentDestination,
       sshKey: currentSshKey,
-      dryRun: currentDryRun,
       checksum: currentChecksum,
+      localNetwork: currentLocalNetwork,
       direction: currentDirection,
       localDestination: currentLocalDestination,
     });

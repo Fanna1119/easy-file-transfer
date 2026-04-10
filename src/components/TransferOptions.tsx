@@ -1,8 +1,10 @@
 interface TransferOptionsProps {
   dryRun: boolean;
   checksum: boolean;
+  localNetwork: boolean;
   onDryRunChange: (v: boolean) => void;
   onChecksumChange: (v: boolean) => void;
+  onLocalNetworkChange: (v: boolean) => void;
 }
 
 function Toggle({
@@ -45,8 +47,10 @@ function Toggle({
 export function TransferOptions({
   dryRun,
   checksum,
+  localNetwork,
   onDryRunChange,
   onChecksumChange,
+  onLocalNetworkChange,
 }: TransferOptionsProps) {
   return (
     <div className="space-y-3">
@@ -61,6 +65,12 @@ export function TransferOptions({
         description="Use --checksum: compare file checksums instead of mod-time+size"
         checked={checksum}
         onChange={onChecksumChange}
+      />
+      <Toggle
+        label="Local Network Transfer (speed optimize)"
+        description="Disables delta sync and sends full files to maximize speed on fast local networks."
+        checked={localNetwork}
+        onChange={onLocalNetworkChange}
       />
     </div>
   );

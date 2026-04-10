@@ -4,20 +4,42 @@ A lightweight desktop app for transferring files over SSH using `rsync`. Built w
 
 ## Screenshots
 
-<img src="public/Screenshot 2026-04-02 at 09.43.02.png" alt="Upload mode with active transfer" width="600">
+<img src="public/Screenshot1.png" alt="Main window" width="600">
 
-<img src="public/Screenshot 2026-04-02 at 09.43.53.png" alt="Download mode" width="600">
-
-<img src="public/Screenshot 2026-04-02 at 09.39.50.png" alt="Remote directory browser" width="600">
+<img src="public/Screenshot2.png" alt="Settings" width="600">
 
 ## Features
 
-- **File selection** — pick individual files or whole directories from your local machine
-- **SSH destination** — specify a remote target in standard `user@host:/path` format
+### File Browser
+
+- **Dual-pane browser** — local and remote directories side by side with a draggable vertical divider
+- **Drag & drop** — drag files from either pane to the other to start a transfer; drop onto a specific subfolder to target it directly
+- **Context menu** — right-click any file or folder to rename, upload/download, or delete; right-click empty space to create a new folder
+- **Multi-select** — Shift-click and Ctrl/Cmd-click to select ranges or individual items; bulk operations (delete, upload, download) act on the whole selection
+- **Inline rename** — rename files and folders directly in the browser without a popup
+- **Inline folder creation** — create a new folder inline with a single right-click
+- **Delete with confirmation** — delete one or multiple items with a confirmation dialog showing the item count; works on both local and remote
+
+### Transfers
+
+- **SSH / rsync backend** — all transfers run via `rsync` over SSH for reliability and delta-transfer efficiency
+- **Resumable transfers** — uses `--partial-dir=.rsync-partial` so interrupted transfers pick up where they left off
+- **Checksum verification** — optionally verify file integrity using checksums instead of size+timestamp
+- **Local network optimisation** — disables compression when transferring on a LAN for higher throughput
+- **Transfer queue** — run multiple transfers concurrently with live progress bar, speed, ETA, and file counter
+- **Cancel** — gracefully cancel any in-flight transfer; partial data is preserved for resumption
+
+### SSH
+
 - **SSH key auth** — select a key file and optionally provide a passphrase
-- **Transfer options** — dry-run preview and checksum verification modes
-- **Transfer queue** — run multiple transfers concurrently with live progress, speed, and ETA
-- **Profiles** — save and reuse destination + key configurations
+- **Connection profiles** — save and reuse host, user, port, key, and transfer option configurations
+- **Remote browser** — navigate the remote filesystem with directory caching and smart pre-fetch for instant traversal
+
+### UI
+
+- **Message log** — timestamped, colour-coded log of all actions (green = success, yellow = warning/delete/cancel, red = error)
+- **Resizable panels** — drag the horizontal dividers to resize the message log and transfer queue independently
+- **Collapsible panels** — collapse the message log and transfer queue to reclaim screen space
 
 ## Prerequisites
 
@@ -26,6 +48,7 @@ A lightweight desktop app for transferring files over SSH using `rsync`. Built w
 - [Rust](https://rustup.rs) toolchain
 
 ## Pre built mac binaries
+
 see [Releases](https://github.com/Fanna1119/easy-file-transfer/releases)
 
 ## Development

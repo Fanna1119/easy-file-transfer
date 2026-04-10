@@ -54,9 +54,6 @@ export function TransferItem({ item, onCancel }: TransferItemProps) {
           title={label}
         >
           {label}
-          {item.config.dryRun && (
-            <span className="text-yellow-400 italic ml-1">(dry)</span>
-          )}
         </span>
 
         <span className="text-xs text-slate-500 truncate max-w-[180px] shrink-0 font-mono hidden sm:block">

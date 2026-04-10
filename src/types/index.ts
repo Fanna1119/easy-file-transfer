@@ -7,7 +7,7 @@ export interface TransferConfig {
   destination: string;
   sshKey: string | null;
   passphrase: string | null;
-  dryRun: boolean;
+  resumable: boolean;
   checksum: boolean;
   localNetwork: boolean;
   basePath: string | null;
@@ -111,7 +111,7 @@ export interface Profile {
   name: string;
   destination: string;
   sshKey: string | null;
-  dryRun: boolean;
+  resumable?: boolean;
   checksum: boolean;
   localNetwork?: boolean;
   direction?: TransferDirection;
@@ -123,7 +123,7 @@ export interface TransferConfig {
   destination: string;
   sshKey: string | null;
   passphrase: string | null;
-  dryRun: boolean;
+  resumable: boolean;
   checksum: boolean;
   localNetwork: boolean;
   basePath: string | null;

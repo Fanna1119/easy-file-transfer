@@ -52,7 +52,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
 
   // Transfer options
-  const [dryRun, setDryRun] = useState(false);
+  const [resumable, setResumable] = useState(true);
   const [checksum, setChecksum] = useState(false);
   const [localNetwork, setLocalNetwork] = useState(false);
   const [cacheRemoteDirs, setCacheRemoteDirs] = useState(true);
@@ -110,7 +110,7 @@ export default function App() {
       port: match?.[3] ? Number(match[3]) : prev.port,
       sshKey: p.sshKey,
     }));
-    setDryRun(p.dryRun);
+    setResumable(p.resumable ?? true);
     setChecksum(p.checksum);
     setLocalNetwork(p.localNetwork ?? false);
   };
@@ -125,7 +125,7 @@ export default function App() {
       destination,
       sshKey: connection.sshKey,
       passphrase: connection.passphrase || null,
-      dryRun,
+      resumable,
       checksum,
       localNetwork,
       basePath:
@@ -147,7 +147,7 @@ export default function App() {
         destination: source,
         sshKey: connection.sshKey,
         passphrase: connection.passphrase || null,
-        dryRun,
+        resumable,
         checksum,
         localNetwork,
         basePath: null,
@@ -166,11 +166,6 @@ export default function App() {
         <span className="text-xs font-semibold text-slate-400 tracking-tight">
           Easy File Transfer
         </span>
-        {dryRun && (
-          <span className="ml-2 text-xs bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded-full">
-            DRY RUN
-          </span>
-        )}
       </header>
 
       {/* Connection bar */}
@@ -238,12 +233,12 @@ export default function App() {
       {/* Settings modal */}
       {showSettings && (
         <SettingsModal
-          dryRun={dryRun}
+          resumable={resumable}
           checksum={checksum}
           localNetwork={localNetwork}
           cacheRemoteDirs={cacheRemoteDirs}
           smartTraverse={smartTraverse}
-          onDryRunChange={setDryRun}
+          onResumableChange={setResumable}
           onChecksumChange={setChecksum}
           onLocalNetworkChange={setLocalNetwork}
           onCacheRemoteDirsChange={setCacheRemoteDirs}

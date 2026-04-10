@@ -27,7 +27,7 @@ pub struct TransferConfig {
     pub destination: String,
     pub ssh_key: Option<String>,
     pub passphrase: Option<String>,
-    pub dry_run: bool,
+    pub resumable: bool,
     pub checksum: bool,
     /// When true: LAN mode — disables delta algorithm and compression for raw throughput.
     /// When false (default): WAN mode — enables compression for bandwidth efficiency.
@@ -101,7 +101,11 @@ fn find_rsync() -> (String, bool) {
 }
 
 fn build_rsync_args(cfg: &TransferConfig, gnu_rsync: bool) -> Vec<String> {
-    let mut args: Vec<String> = vec!["--archive".into(), "--partial".into(), "--verbose".into()];
+    let mut args: Vec<String> = vec!["--archive".into(), "--verbose".into()];
+
+    if cfg.resumable {
+        args.push("--partial-dir=.rsync-partial".into());
+    }
 
     // --info=progress2 = GNU rsync only; --progress works everywhere
     if gnu_rsync {
@@ -119,9 +123,6 @@ fn build_rsync_args(cfg: &TransferConfig, gnu_rsync: bool) -> Vec<String> {
         args.push("--compress".into());
     }
 
-    if cfg.dry_run {
-        args.push("--dry-run".into());
-    }
     if cfg.checksum {
         args.push("--checksum".into());
     }
@@ -371,16 +372,23 @@ fn emit_line(app: &AppHandle, tid: &str, line: &str, errors: &mut Vec<String>) {
 #[tauri::command]
 pub fn cancel_transfer(transfer_id: String, state: State<'_, TransferState>) -> Result<(), String> {
     let mut map = state.0.lock().map_err(|e| e.to_string())?;
-    if let Some((mut child, cancelled)) = map.remove(&transfer_id) {
+    if let Some((child, cancelled)) = map.remove(&transfer_id) {
         cancelled.store(true, Ordering::Relaxed);
-        // Kill rsync's children (e.g. the SSH subprocess) before killing rsync itself,
-        // so the SSH process doesn't become an orphan and continue the transfer.
         if let Some(pid) = child.id() {
+            // Send SIGTERM so rsync can gracefully save the partial file to
+            // --partial-dir before exiting. SIGKILL would leave a random-suffix
+            // temp file behind that rsync can never resume.
+            let _ = std::process::Command::new("kill")
+                .args(["-TERM", &pid.to_string()])
+                .output();
+            // Also SIGTERM any SSH child spawned by rsync (avoids orphan SSH).
             let _ = std::process::Command::new("pkill")
-                .args(["-9", "-P", &pid.to_string()])
+                .args(["-TERM", "-P", &pid.to_string()])
                 .output();
         }
-        child.start_kill().map_err(|e| e.to_string())?;
+        // Fall back to SIGKILL if the process doesn't exit on its own.
+        // We drop `child` here; Tokio will reap it when it eventually exits.
+        drop(child);
     }
     Ok(())
 }

@@ -4,12 +4,12 @@ import type { ConnectionConfig, Profile, TransferDirection } from "../types";
 
 interface SettingsModalProps {
   // Transfer options
-  dryRun: boolean;
+  resumable: boolean;
   checksum: boolean;
   localNetwork: boolean;
   cacheRemoteDirs: boolean;
   smartTraverse: boolean;
-  onDryRunChange: (v: boolean) => void;
+  onResumableChange: (v: boolean) => void;
   onChecksumChange: (v: boolean) => void;
   onLocalNetworkChange: (v: boolean) => void;
   onCacheRemoteDirsChange: (v: boolean) => void;
@@ -27,12 +27,12 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal({
-  dryRun,
+  resumable,
   checksum,
   localNetwork,
   cacheRemoteDirs,
   smartTraverse,
-  onDryRunChange,
+  onResumableChange,
   onChecksumChange,
   onLocalNetworkChange,
   onCacheRemoteDirsChange,
@@ -60,7 +60,7 @@ export function SettingsModal({
       name: savingName.trim(),
       destination: dest,
       sshKey: connection.sshKey,
-      dryRun,
+      resumable,
       checksum,
       localNetwork,
       direction,
@@ -99,10 +99,10 @@ export function SettingsModal({
             </h3>
             <div className="space-y-2">
               <Toggle
-                label="Dry Run"
-                description="Preview only — no files transferred"
-                checked={dryRun}
-                onChange={onDryRunChange}
+                label="Resumable Transfers"
+                description="Resume interrupted transfers from where they stopped"
+                checked={resumable}
+                onChange={onResumableChange}
               />
               <Toggle
                 label="Checksum Verification"

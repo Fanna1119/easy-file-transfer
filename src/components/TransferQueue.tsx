@@ -1,17 +1,21 @@
 import type { TransferItem as TItem } from "../types";
 import { TransferItem } from "./TransferItem";
-import { ArrowDownUp } from "lucide-react";
+import { ArrowDownUp, ChevronDown, ChevronUp } from "lucide-react";
 
 interface TransferQueueProps {
   queue: TItem[];
   onCancel: (id: string) => void;
   onClearCompleted: () => void;
+  collapsed: boolean;
+  onToggle: () => void;
 }
 
 export function TransferQueue({
   queue,
   onCancel,
   onClearCompleted,
+  collapsed,
+  onToggle,
 }: TransferQueueProps) {
   const completedCount = queue.filter(
     (i) =>
@@ -25,7 +29,10 @@ export function TransferQueue({
   return (
     <div className="flex flex-col h-full border-t border-slate-700 bg-slate-900">
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 h-7 bg-slate-800 border-b border-slate-700 shrink-0">
+      <div
+        className="flex items-center gap-2 px-3 h-7 bg-slate-800 border-b border-slate-700 shrink-0 cursor-pointer hover:bg-slate-700/50 transition-colors select-none"
+        onClick={onToggle}
+      >
         <ArrowDownUp size={11} className="text-slate-400" />
         <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest">
           Transfer Queue
@@ -36,28 +43,40 @@ export function TransferQueue({
             {queue.length} total
           </span>
         )}
-        {completedCount > 0 && (
-          <button
-            onClick={onClearCompleted}
-            className="ml-auto text-xs text-slate-500 hover:text-slate-300 transition-colors"
-          >
-            Clear ({completedCount})
-          </button>
-        )}
+        <span className="ml-auto flex items-center gap-2">
+          {completedCount > 0 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onClearCompleted();
+              }}
+              className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+            >
+              Clear ({completedCount})
+            </button>
+          )}
+          {collapsed ? (
+            <ChevronUp size={12} className="text-slate-500" />
+          ) : (
+            <ChevronDown size={12} className="text-slate-500" />
+          )}
+        </span>
       </div>
 
       {/* Items */}
-      <div className="flex-1 overflow-y-auto min-h-0">
-        {queue.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-xs text-slate-700">
-            Drag files between panes to start a transfer
-          </div>
-        ) : (
-          queue.map((item) => (
-            <TransferItem key={item.id} item={item} onCancel={onCancel} />
-          ))
-        )}
-      </div>
+      {!collapsed && (
+        <div className="flex-1 overflow-y-auto min-h-0">
+          {queue.length === 0 ? (
+            <div className="flex items-center justify-center h-full text-xs text-slate-700">
+              Drag files between panes to start a transfer
+            </div>
+          ) : (
+            queue.map((item) => (
+              <TransferItem key={item.id} item={item} onCancel={onCancel} />
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }

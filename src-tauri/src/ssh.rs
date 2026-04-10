@@ -172,6 +172,42 @@ pub async fn test_ssh_connection(params: RemoteBrowseParams) -> Result<String, S
         .map(|_| "Connected".to_string())
 }
 
+/// Rename a remote file or directory (new_name is a bare name, not a full path).
+#[tauri::command]
+pub async fn rename_remote(params: RemoteBrowseParams, new_name: String) -> Result<(), String> {
+    let safe_from = params.path.replace('\'', "'\\''");
+    // Build destination alongside source
+    let parent = params.path.rsplit_once('/').map(|(p, _)| p).unwrap_or(".");
+    let safe_dest = format!("{}/{}", parent, new_name.trim_matches('/')).replace('\'', "'\\''");
+    let cmd = format!("mv '{}' '{}'", safe_from, safe_dest);
+    run_remote(&params, &cmd).await.map(|_| ())
+}
+
+/// Create a new remote directory.
+#[tauri::command]
+pub async fn create_remote_dir(params: RemoteBrowseParams, name: String) -> Result<(), String> {
+    let safe_parent = params.path.replace('\'', "'\\''");
+    let safe_name = name.trim_matches('/').replace('\'', "'\\''");
+    let cmd = format!("mkdir -p '{}/{}' ", safe_parent, safe_name);
+    run_remote(&params, &cmd).await.map(|_| ())
+}
+
+/// Delete remote files/directories. Each path is removed with `rm -rf`.
+#[tauri::command]
+pub async fn delete_remote(params: RemoteBrowseParams, paths: Vec<String>) -> Result<(), String> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    // Build a single `rm -rf 'path1' 'path2' …` command.
+    let args: String = paths
+        .iter()
+        .map(|p| format!("'{}'", p.replace('\'', "'\\''")))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let cmd = format!("rm -rf {}", args);
+    run_remote(&params, &cmd).await.map(|_| ())
+}
+
 // ── ls -la parser ─────────────────────────────────────────────────────────────
 
 /// Parse a single `ls -la` output line into a FileEntry.

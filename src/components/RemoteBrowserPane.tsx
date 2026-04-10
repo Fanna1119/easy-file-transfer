@@ -10,13 +10,20 @@ import {
   AlertCircle,
   WifiOff,
   Home,
+  Pencil,
+  Download,
+  FolderPlus,
+  Trash2,
 } from "lucide-react";
-import type { ConnectionConfig, FileEntry } from "../types";
+import type { ConnectionConfig, FileEntry, LogType } from "../types";
 import {
   setDragPayload,
   getDragPayload,
   clearDragPayload,
 } from "../lib/dragStore";
+import { ContextMenu } from "./ContextMenu";
+import type { ContextMenuEntry } from "./ContextMenu";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 interface RemoteBrowserPaneProps {
   connected: boolean;
@@ -26,9 +33,16 @@ interface RemoteBrowserPaneProps {
   /** Pre-fetch one level into visible subdirectories for instant navigation. Requires cacheEnabled. */
   smartTraverse: boolean;
   /** Called when the user drops local entries here (upload). */
-  onDropLocal: (entries: Array<{ path: string; isDir: boolean }>) => void;
+  onDropLocal: (
+    entries: Array<{ path: string; isDir: boolean }>,
+    remoteDest?: string,
+  ) => void;
   /** Parent is notified whenever the current remote path changes. */
   onPathChange: (path: string) => void;
+  /** Context-menu "Download to local" action. */
+  onDownload?: (entries: Array<{ path: string; isDir: boolean }>) => void;
+  /** Append a message to the global log. */
+  onLog?: (msg: string, type?: LogType) => void;
 }
 
 export function RemoteBrowserPane({
@@ -38,6 +52,8 @@ export function RemoteBrowserPane({
   smartTraverse,
   onDropLocal,
   onPathChange,
+  onDownload,
+  onLog,
 }: RemoteBrowserPaneProps) {
   const [currentPath, setCurrentPath] = useState<string>("/");
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -48,8 +64,27 @@ export function RemoteBrowserPane({
   const [editingPath, setEditingPath] = useState(false);
   const [editValue, setEditValue] = useState("");
   const [dragOver, setDragOver] = useState(false);
+  const [folderDragOver, setFolderDragOver] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const anchorIdxRef = useRef<number | null>(null);
+
+  // Context menu
+  type CtxState = { x: number; y: number; entry: FileEntry | null } | null;
+  const [ctxMenu, setCtxMenu] = useState<CtxState>(null);
+
+  // Inline rename
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+
+  // Create folder
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("New Folder");
+
+  // Delete
+  const [confirmDelete, setConfirmDelete] = useState<{
+    paths: string[];
+    count: number;
+  } | null>(null);
 
   type SortCol = "name" | "size" | "modified";
   const [sortCol, setSortCol] = useState<SortCol>("name");
@@ -233,6 +268,76 @@ export function RemoteBrowserPane({
     onPathChange(next);
   };
 
+  const remoteParams = () => ({
+    user: connection.user,
+    host: connection.host,
+    port: connection.port,
+    path: "",
+    sshKey: connection.sshKey,
+    passphrase: connection.passphrase || null,
+    maxDepth: 1,
+  });
+
+  const commitRename = async (entry: FileEntry) => {
+    const newName = renameValue.trim();
+    setRenaming(null);
+    if (!newName || newName === entry.name) return;
+    try {
+      await invoke("rename_remote", {
+        params: { ...remoteParams(), path: entry.path },
+        newName,
+      });
+      load(currentPath, true);
+    } catch (e) {
+      console.error("rename_remote failed:", e);
+    }
+  };
+
+  const commitCreateFolder = async () => {
+    const name = newFolderName.trim();
+    setCreatingFolder(false);
+    setNewFolderName("New Folder");
+    if (!name) return;
+    try {
+      await invoke("create_remote_dir", {
+        params: { ...remoteParams(), path: currentPath },
+        name,
+      });
+      load(currentPath, true);
+    } catch (e) {
+      console.error("create_remote_dir failed:", e);
+    }
+  };
+
+  const handleDelete = async (paths: string[]) => {
+    try {
+      await invoke("delete_remote", {
+        params: { ...remoteParams(), path: currentPath },
+        paths,
+      });
+      setSelected(new Set());
+      load(currentPath, true);
+      onLog?.(
+        `Deleted ${paths.length} item${paths.length === 1 ? "" : "s"} from ${currentPath}`,
+        "warning",
+      );
+    } catch (e) {
+      console.error("delete_remote failed:", e);
+      onLog?.(`Delete failed: ${String(e)}`, "error");
+    }
+  };
+
+  const openContextMenu = (e: React.MouseEvent, entry: FileEntry | null) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (entry) {
+      setSelected((prev) =>
+        prev.has(entry.path) ? prev : new Set([entry.path]),
+      );
+    }
+    setCtxMenu({ x: e.clientX, y: e.clientY, entry });
+  };
+
   const handleRowClick = (
     e: React.MouseEvent,
     entry: FileEntry,
@@ -273,24 +378,29 @@ export function RemoteBrowserPane({
     e.dataTransfer.effectAllowed = "copy";
   };
 
-  // Drop target: accept local files dragged from the local pane
+  // Pane-level drop: local → current remote directory
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    const storePayload = getDragPayload();
-    const rawDT = e.dataTransfer.getData("application/x-eft");
-    let payload = storePayload;
+    setFolderDragOver(null);
+    const payload = getDragPayload();
     clearDragPayload();
-    if (!payload) {
-      try {
-        if (rawDT) payload = JSON.parse(rawDT);
-      } catch {
-        /* ignore */
-      }
-    }
     if (!payload || payload.source !== "local" || payload.entries.length === 0)
       return;
     onDropLocal(payload.entries);
+  };
+
+  // Drop onto a specific folder row → upload into that folder
+  const handleFolderDrop = (e: React.DragEvent, targetFolder: FileEntry) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setFolderDragOver(null);
+    setDragOver(false);
+    const payload = getDragPayload();
+    clearDragPayload();
+    if (!payload || payload.source !== "local" || payload.entries.length === 0)
+      return;
+    onDropLocal(payload.entries, targetFolder.path);
   };
 
   const startEditPath = () => {
@@ -323,6 +433,9 @@ export function RemoteBrowserPane({
           setDragOver(false);
       }}
       onDrop={handleDrop}
+      onContextMenu={(e) => {
+        if (connected) openContextMenu(e, null);
+      }}
     >
       {/* Header */}
       <div className="flex items-center gap-1 px-2 py-1.5 bg-slate-800 border-b border-slate-700 shrink-0">
@@ -468,14 +581,45 @@ export function RemoteBrowserPane({
                 key={entry.path}
                 draggable
                 onClick={(e) => handleRowClick(e, entry, idx)}
+                onContextMenu={(e) => openContextMenu(e, entry)}
                 onDragStart={(e) => handleDragStart(e, entry)}
                 onDoubleClick={() => {
                   if (entry.isDir) navigate(entry.path);
                 }}
-                className={`flex items-center gap-2 px-2 py-[3px] text-xs cursor-default select-none ${
-                  selected.has(entry.path)
-                    ? "bg-blue-600/25 text-white border-l-2 border-blue-500"
-                    : "text-slate-200 hover:bg-slate-800"
+                onDragEnter={
+                  entry.isDir
+                    ? (e) => {
+                        e.preventDefault();
+                        setFolderDragOver(entry.path);
+                      }
+                    : undefined
+                }
+                onDragOver={
+                  entry.isDir
+                    ? (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.dataTransfer.dropEffect = "copy";
+                      }
+                    : undefined
+                }
+                onDragLeave={
+                  entry.isDir
+                    ? (e) => {
+                        if (!e.currentTarget.contains(e.relatedTarget as Node))
+                          setFolderDragOver(null);
+                      }
+                    : undefined
+                }
+                onDrop={
+                  entry.isDir ? (e) => handleFolderDrop(e, entry) : undefined
+                }
+                className={`flex items-center gap-2 px-2 py-[3px] text-xs cursor-default select-none border-l-2 ${
+                  folderDragOver === entry.path
+                    ? "bg-blue-700/30 border-blue-400"
+                    : selected.has(entry.path)
+                      ? "bg-blue-600/25 text-white border-blue-500"
+                      : "text-slate-200 hover:bg-slate-800 border-transparent"
                 }`}
               >
                 {entry.isDir ? (
@@ -483,9 +627,25 @@ export function RemoteBrowserPane({
                 ) : (
                   <File size={13} className="text-slate-500 shrink-0" />
                 )}
-                <span className="flex-1 min-w-0 truncate" title={entry.name}>
-                  {entry.name}
-                </span>
+                {renaming === entry.path ? (
+                  <input
+                    autoFocus
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onBlur={() => commitRename(entry)}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === "Enter") commitRename(entry);
+                      if (e.key === "Escape") setRenaming(null);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex-1 min-w-0 px-1 bg-slate-700 border border-blue-500 rounded outline-none text-slate-100 font-mono"
+                  />
+                ) : (
+                  <span className="flex-1 min-w-0 truncate" title={entry.name}>
+                    {entry.name}
+                  </span>
+                )}
                 <span className="w-20 text-right shrink-0 text-slate-400">
                   {entry.isDir ? "" : formatSize(entry.size)}
                 </span>
@@ -495,12 +655,121 @@ export function RemoteBrowserPane({
               </div>
             ))}
 
-            {entries.length === 0 && !loading && (
+            {/* Inline new-folder row */}
+            {creatingFolder && (
+              <div className="flex items-center gap-2 px-2 py-[3px] text-xs border-l-2 border-blue-500 bg-blue-600/10">
+                <Folder size={13} className="text-yellow-500 shrink-0" />
+                <input
+                  autoFocus
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  onBlur={commitCreateFolder}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commitCreateFolder();
+                    if (e.key === "Escape") {
+                      setCreatingFolder(false);
+                      setNewFolderName("New Folder");
+                    }
+                  }}
+                  className="flex-1 min-w-0 px-1 bg-slate-700 border border-blue-500 rounded outline-none text-slate-100 font-mono"
+                />
+              </div>
+            )}
+
+            {entries.length === 0 && !loading && !creatingFolder && (
               <div className="p-3 text-xs text-slate-600">Empty folder</div>
             )}
           </>
         )}
       </div>
+
+      {/* Context menu */}
+      {confirmDelete && (
+        <ConfirmDialog
+          message={`Are you sure you want to delete ${confirmDelete.count} item${confirmDelete.count === 1 ? "" : "s"}?`}
+          onConfirm={() => {
+            const paths = confirmDelete.paths;
+            setConfirmDelete(null);
+            handleDelete(paths);
+          }}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
+
+      {ctxMenu && (
+        <ContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          onClose={() => setCtxMenu(null)}
+          items={
+            ctxMenu.entry
+              ? ([
+                  {
+                    label: "Rename",
+                    icon: <Pencil size={12} />,
+                    onClick: () => {
+                      setRenameValue(ctxMenu.entry!.name);
+                      setRenaming(ctxMenu.entry!.path);
+                    },
+                  },
+                  ...(onDownload
+                    ? [
+                        { separator: true } as ContextMenuEntry,
+                        {
+                          label: "Download to local",
+                          icon: <Download size={12} />,
+                          onClick: () => {
+                            const selEntries =
+                              selected.size > 0
+                                ? sortedEntries
+                                    .filter((en) => selected.has(en.path))
+                                    .map((en) => ({
+                                      path: en.path,
+                                      isDir: en.isDir,
+                                    }))
+                                : [
+                                    {
+                                      path: ctxMenu.entry!.path,
+                                      isDir: ctxMenu.entry!.isDir,
+                                    },
+                                  ];
+                            onDownload(selEntries);
+                          },
+                        } as ContextMenuEntry,
+                      ]
+                    : []),
+                  { separator: true } as ContextMenuEntry,
+                  {
+                    label: "Delete",
+                    icon: <Trash2 size={12} />,
+                    danger: true,
+                    onClick: () => {
+                      const toDelete =
+                        selected.size > 0
+                          ? sortedEntries
+                              .filter((en) => selected.has(en.path))
+                              .map((en) => en.path)
+                          : [ctxMenu.entry!.path];
+                      setConfirmDelete({
+                        paths: toDelete,
+                        count: toDelete.length,
+                      });
+                    },
+                  } as ContextMenuEntry,
+                ] as ContextMenuEntry[])
+              : ([
+                  {
+                    label: "New Folder",
+                    icon: <FolderPlus size={12} />,
+                    onClick: () => {
+                      setNewFolderName("New Folder");
+                      setCreatingFolder(true);
+                    },
+                  },
+                ] as ContextMenuEntry[])
+          }
+        />
+      )}
     </div>
   );
 }

@@ -1,8 +1,9 @@
 import { useEffect, useRef } from "react";
 import { ChevronDown, ChevronUp, Terminal } from "lucide-react";
+import type { LogEntry } from "../types";
 
 interface MessageLogProps {
-  messages: string[];
+  messages: LogEntry[];
   collapsed: boolean;
   onToggle: () => void;
 }
@@ -16,12 +17,21 @@ export function MessageLog({ messages, collapsed, onToggle }: MessageLogProps) {
     }
   }, [messages, collapsed]);
 
+  const colorClass = (type: LogEntry["type"]) => {
+    switch (type) {
+      case "success":
+        return "text-green-400";
+      case "warning":
+        return "text-yellow-400";
+      case "error":
+        return "text-red-400";
+      default:
+        return "text-slate-300";
+    }
+  };
+
   return (
-    <div
-      className={`flex flex-col border-b border-slate-700 bg-slate-950 transition-all ${
-        collapsed ? "h-7" : "h-28"
-      }`}
-    >
+    <div className="flex flex-col bg-slate-950 overflow-hidden h-full">
       {/* Header bar */}
       <button
         onClick={onToggle}
@@ -43,21 +53,9 @@ export function MessageLog({ messages, collapsed, onToggle }: MessageLogProps) {
           {messages.length === 0 ? (
             <span className="text-slate-600">No messages yet.</span>
           ) : (
-            messages.map((msg, i) => (
-              <div
-                key={i}
-                className={`leading-5 ${
-                  msg.toLowerCase().includes("error") ||
-                  msg.toLowerCase().includes("failed") ||
-                  msg.toLowerCase().includes("denied")
-                    ? "text-red-400"
-                    : msg.toLowerCase().includes("connected") ||
-                        msg.toLowerCase().includes("success")
-                      ? "text-green-400"
-                      : "text-slate-300"
-                }`}
-              >
-                {msg}
+            messages.map((entry, i) => (
+              <div key={i} className={`leading-5 ${colorClass(entry.type)}`}>
+                {entry.text}
               </div>
             ))
           )}

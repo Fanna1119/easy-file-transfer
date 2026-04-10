@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Radio } from "lucide-react";
 import { useTransfer } from "./hooks/useTransfer";
@@ -10,7 +10,12 @@ import { RemoteBrowserPane } from "./components/RemoteBrowserPane";
 import { TransferQueue } from "./components/TransferQueue";
 import { SettingsModal } from "./components/SettingsModal";
 import "./App.css";
-import type { ConnectionConfig, Profile } from "./types";
+import type {
+  ConnectionConfig,
+  LogEntry,
+  Profile,
+  TransferStatus,
+} from "./types";
 
 export default function App() {
   const [connection, setConnection] = useState<ConnectionConfig>({
@@ -47,8 +52,11 @@ export default function App() {
     window.addEventListener("mouseup", onUp);
   }, []);
 
-  const [messages, setMessages] = useState<string[]>([]);
+  const [messages, setMessages] = useState<LogEntry[]>([]);
   const [logCollapsed, setLogCollapsed] = useState(false);
+  const [logHeight, setLogHeight] = useState(112);
+  const [queueHeight, setQueueHeight] = useState(160);
+  const [queueCollapsed, setQueueCollapsed] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
 
   // Transfer options
@@ -62,12 +70,73 @@ export default function App() {
     useTransfer();
   const { profiles, saveProfile, deleteProfile } = useProfiles();
 
-  const addLog = useCallback((msg: string) => {
+  const startLogResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = logHeight;
+    const onMove = (ev: MouseEvent) => {
+      setLogHeight(Math.min(400, Math.max(56, startH + (ev.clientY - startY))));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  const startQueueResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = queueHeight;
+    const onMove = (ev: MouseEvent) => {
+      setQueueHeight(
+        Math.min(400, Math.max(56, startH - (ev.clientY - startY))),
+      );
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  const addLog = useCallback((msg: string, type: LogEntry["type"] = "info") => {
     setMessages((prev) => [
       ...prev,
-      `[${new Date().toLocaleTimeString()}] ${msg}`,
+      { text: `[${new Date().toLocaleTimeString()}] ${msg}`, type },
     ]);
   }, []);
+
+  // Log transfer status transitions (completed → green, cancelled → yellow, failed → red)
+  const prevStatusRef = useRef<Map<string, TransferStatus>>(new Map());
+  useEffect(() => {
+    for (const item of queue) {
+      const prev = prevStatusRef.current.get(item.id);
+      if (prev !== undefined && prev !== item.status) {
+        const dest = item.config.destination;
+        const dir = item.config.direction;
+        if (item.status === "completed") {
+          const msg =
+            dir === "upload"
+              ? `Transfer complete: uploaded to ${dest}`
+              : `Transfer complete: downloaded to ${item.config.localDestination ?? dest}`;
+          addLog(msg, "success");
+        } else if (item.status === "cancelled") {
+          addLog(
+            `Transfer cancelled: ${dir === "upload" ? dest : dest}`,
+            "warning",
+          );
+        } else if (item.status === "failed") {
+          addLog(`Transfer failed: ${item.message ?? dest}`, "error");
+        }
+      }
+    }
+    prevStatusRef.current = new Map(
+      queue.map((item) => [item.id, item.status]),
+    );
+  }, [queue, addLog]);
 
   const handleConnect = async () => {
     if (!connection.host.trim() || !connection.user.trim()) return;
@@ -86,10 +155,10 @@ export default function App() {
         },
       });
       setConnected(true);
-      addLog(`Connected to ${connection.user}@${connection.host}`);
+      addLog(`Connected to ${connection.user}@${connection.host}`, "success");
       setLogCollapsed(true);
     } catch (err) {
-      addLog(`Error: ${String(err)}`);
+      addLog(`Error: ${String(err)}`, "error");
       setLogCollapsed(false);
     } finally {
       setConnecting(false);
@@ -116,9 +185,14 @@ export default function App() {
   };
 
   // Called when local files are dropped onto the remote pane → upload
-  const handleUpload = (entries: Array<{ path: string; isDir: boolean }>) => {
+  const handleUpload = (
+    entries: Array<{ path: string; isDir: boolean }>,
+    remoteDest?: string,
+  ) => {
     if (!connected || entries.length === 0) return;
-    const destination = `${connection.user}@${connection.host}:${remotePath}/`;
+    const destination = remoteDest
+      ? `${connection.user}@${connection.host}:${remoteDest}/`
+      : `${connection.user}@${connection.host}:${remotePath}/`;
     addLog(`Uploading ${entries.length} item(s) → ${destination}`);
     startTransfer({
       files: entries.map((e) => e.path),
@@ -137,8 +211,12 @@ export default function App() {
   };
 
   // Called when remote files are dropped onto the local pane → download
-  const handleDownload = (entries: Array<{ path: string; isDir: boolean }>) => {
+  const handleDownload = (
+    entries: Array<{ path: string; isDir: boolean }>,
+    localDest?: string,
+  ) => {
     if (!connected || entries.length === 0) return;
+    const dest = localDest ?? localPath;
     for (const { path } of entries) {
       const source = `${connection.user}@${connection.host}:${path}`;
       addLog(`Downloading ${source}`);
@@ -152,7 +230,7 @@ export default function App() {
         localNetwork,
         basePath: null,
         direction: "download",
-        localDestination: localPath,
+        localDestination: dest,
         port: connection.port,
       });
     }
@@ -181,11 +259,24 @@ export default function App() {
       />
 
       {/* Message log */}
-      <MessageLog
-        messages={messages}
-        collapsed={logCollapsed}
-        onToggle={() => setLogCollapsed((v) => !v)}
-      />
+      <div
+        className="shrink-0 overflow-hidden"
+        style={{ height: logCollapsed ? 28 : logHeight }}
+      >
+        <MessageLog
+          messages={messages}
+          collapsed={logCollapsed}
+          onToggle={() => setLogCollapsed((v) => !v)}
+        />
+      </div>
+
+      {/* Log ↔ browser resize handle */}
+      {!logCollapsed && (
+        <div
+          onMouseDown={startLogResize}
+          className="h-1 shrink-0 bg-slate-700 hover:bg-blue-500 active:bg-blue-400 cursor-row-resize transition-colors"
+        />
+      )}
 
       {/* Dual pane file browser */}
       <div
@@ -199,6 +290,8 @@ export default function App() {
           <LocalBrowser
             onDropRemote={handleDownload}
             onLocalPathChange={setLocalPath}
+            onUpload={handleUpload}
+            onLog={addLog}
           />
         </div>
 
@@ -217,16 +310,31 @@ export default function App() {
             smartTraverse={smartTraverse}
             onDropLocal={handleUpload}
             onPathChange={setRemotePath}
+            onDownload={handleDownload}
+            onLog={addLog}
           />
         </div>
       </div>
 
+      {/* Browser ↔ queue resize handle */}
+      {!queueCollapsed && (
+        <div
+          onMouseDown={startQueueResize}
+          className="h-1 shrink-0 bg-slate-700 hover:bg-blue-500 active:bg-blue-400 cursor-row-resize transition-colors"
+        />
+      )}
+
       {/* Transfer queue */}
-      <div className="h-40 shrink-0">
+      <div
+        className="shrink-0 overflow-hidden"
+        style={{ height: queueCollapsed ? 28 : queueHeight }}
+      >
         <TransferQueue
           queue={queue}
           onCancel={cancelTransfer}
           onClearCompleted={clearCompleted}
+          collapsed={queueCollapsed}
+          onToggle={() => setQueueCollapsed((v) => !v)}
         />
       </div>
 

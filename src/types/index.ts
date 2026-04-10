@@ -1,3 +1,12 @@
+// ── Message log ───────────────────────────────────────────────────────────────
+
+export type LogType = "info" | "success" | "warning" | "error";
+
+export interface LogEntry {
+  text: string;
+  type: LogType;
+}
+
 // ── Transfer types ────────────────────────────────────────────────────────────
 
 export type TransferDirection = "upload" | "download";

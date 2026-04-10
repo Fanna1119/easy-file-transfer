@@ -501,3 +501,43 @@ fn format_mode(mode: u32, is_dir: bool) -> String {
         .collect();
     format!("{}{}", d, s)
 }
+
+/// Rename (or move) a local file or directory.
+#[tauri::command]
+pub fn rename_local(from: String, to: String) -> Result<(), String> {
+    let from_expanded = expand_tilde(&from);
+    // `to` is just a name (no slashes) — build full destination beside the source.
+    let parent = std::path::Path::new(&from_expanded)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| ".".to_string());
+    let dest = format!("{}/{}", parent, to.trim_matches('/'));
+    std::fs::rename(&from_expanded, &dest).map_err(|e| e.to_string())
+}
+
+/// Create a new local directory (including any missing parents).
+#[tauri::command]
+pub fn create_local_dir(path: String, name: String) -> Result<(), String> {
+    let parent = expand_tilde(&path);
+    let target = format!(
+        "{}/{}",
+        parent.trim_end_matches('/'),
+        name.trim_matches('/')
+    );
+    std::fs::create_dir_all(&target).map_err(|e| e.to_string())
+}
+
+/// Delete local files/directories. Each path is removed recursively if it is a directory.
+#[tauri::command]
+pub fn delete_local(paths: Vec<String>) -> Result<(), String> {
+    for raw in &paths {
+        let path = expand_tilde(raw);
+        let p = std::path::Path::new(&path);
+        if p.is_dir() {
+            std::fs::remove_dir_all(&path).map_err(|e| format!("{}: {}", path, e))?;
+        } else {
+            std::fs::remove_file(&path).map_err(|e| format!("{}: {}", path, e))?;
+        }
+    }
+    Ok(())
+}

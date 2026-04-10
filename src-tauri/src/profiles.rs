@@ -15,6 +15,8 @@ pub struct Profile {
     pub ssh_key: Option<String>,
     pub dry_run: bool,
     pub checksum: bool,
+    #[serde(default)]
+    pub local_network: Option<bool>,
     /// "upload" or "download"; None means legacy profile (treated as upload).
     #[serde(default)]
     pub direction: Option<String>,
@@ -24,10 +26,7 @@ pub struct Profile {
 }
 
 fn profiles_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("profiles.json"))
 }
